@@ -1,4 +1,4 @@
-# Convex Self-Hosted Deployment Template
+# Convex Self-Hosted Traefik Template
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
