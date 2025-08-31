@@ -1,0 +1,103 @@
+name: ${APP_NAME}
+services:
+  pg:
+    container_name: ${POSTGRES_CONTAINER_NAME}
+    image: postgres:17
+    restart: unless-stopped
+    shm_size: 1g
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: convex_self_hosted
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d convex_self_hosted"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  convex-backend:
+    container_name: ${CONVEX_BACKEND_CONTAINER_NAME}
+    image: ghcr.io/get-convex/convex-backend:${CONVEX_BACKEND_IMAGE_TAG}
+    restart: unless-stopped
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    # ports:
+    #   - "${CONVEX_API_EXTERNAL_PORT}:3210"
+    #   - "${CONVEX_HTTP_ACTIONS_EXTERNAL_PORT}:3211"
+    volumes:
+      - convex-data:/convex/data
+    environment:
+      - CONVEX_CLOUD_ORIGIN=${CONVEX_CLOUD_ORIGIN}
+      - CONVEX_SITE_ORIGIN=${CONVEX_SITE_ORIGIN}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - DO_NOT_REQUIRE_SSL=${DO_NOT_REQUIRE_SSL}
+      - DISABLE_BEACON=${DISABLE_BEACON}
+      - REDACT_LOGS_TO_CLIENT=${REDACT_LOGS_TO_CLIENT}
+      - RUST_LOG=${RUST_LOG}
+    healthcheck:
+      test: curl -f http://localhost:3210/version || exit 1
+      interval: 5s
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-default"
+
+      # --- API Router & Service ---
+      - "traefik.http.routers.${APP_NAME}-api-router.entrypoints=websecure"
+      - "traefik.http.routers.${APP_NAME}-api-router.rule=Host(`api.${DOMAIN}`)"
+      - "traefik.http.routers.${APP_NAME}-api-router.tls=true"
+      - "traefik.http.routers.${APP_NAME}-api-router.tls.certresolver=letsencrypt"
+
+      - "traefik.http.routers.${APP_NAME}-api-router.service=${APP_NAME}-api-service"
+      - "traefik.http.services.${APP_NAME}-api-service.loadbalancer.server.port=3210"
+
+      # --- Site/HTTP Actions Router & Service (${APP_NAME}-site) ---
+      - "traefik.http.routers.${APP_NAME}-site-router.entrypoints=websecure"
+      - "traefik.http.routers.${APP_NAME}-site-router.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.${APP_NAME}-site-router.tls=true"
+      - "traefik.http.routers.${APP_NAME}-site-router.tls.certresolver=letsencrypt"
+
+      - "traefik.http.routers.${APP_NAME}-site-router.service=${APP_NAME}-site-service"
+      - "traefik.http.services.${APP_NAME}-site-service.loadbalancer.server.port=3211"
+
+    depends_on:
+      pg:
+        condition: service_healthy
+
+  convex-dashboard:
+    container_name: ${CONVEX_DASHBOARD_CONTAINER_NAME}
+    image: ghcr.io/get-convex/convex-dashboard:${CONVEX_DASHBOARD_IMAGE_TAG}
+    restart: unless-stopped
+    # ports:
+    #   - "${CONVEX_DASHBOARD_EXTERNAL_PORT}:6791"
+    environment:
+      - NEXT_PUBLIC_DEPLOYMENT_URL=${CONVEX_CLOUD_ORIGIN}
+    depends_on:
+      convex-backend:
+        condition: service_started # Используем service_started, если healthcheck backend'а еще не готов
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-default"
+
+      # --- Dashboard Router & Service (${APP_NAME}-dashboard) ---
+      - "traefik.http.routers.${APP_NAME}-dashboard-router.entrypoints=websecure"
+      - "traefik.http.routers.${APP_NAME}-dashboard-router.rule=Host(`dashboard.${DOMAIN}`)"
+      - "traefik.http.routers.${APP_NAME}-dashboard-router.tls=true"
+      - "traefik.http.routers.${APP_NAME}-dashboard-router.tls.certresolver=letsencrypt"
+
+      - "traefik.http.routers.${APP_NAME}-dashboard-router.service=${APP_NAME}-dashboard-service"
+      - "traefik.http.services.${APP_NAME}-dashboard-service.loadbalancer.server.port=6791"
+networks:
+  default:
+    name: traefik-default
+    external: true
+volumes:
+  pgdata:
+    name: ${APP_NAME}_pgdata
+  convex-data:
+    name: ${APP_NAME}_convex_data
