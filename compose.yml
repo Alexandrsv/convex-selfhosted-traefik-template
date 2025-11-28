@@ -2,23 +2,38 @@ name: ${APP_NAME}
 services:
   pg:
     container_name: ${POSTGRES_CONTAINER_NAME}
-    image: postgres:17
+    image: postgres:18
     restart: unless-stopped
-    shm_size: 1g
+    shm_size: 2g
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     environment:
       POSTGRES_DB: convex_self_hosted
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "${POSTGRES_PORT}:5432"
+    command: >
+      postgres
+      -c max_connections=500
+      -c shared_buffers=2GB
+      -c maintenance_work_mem=256MB
+      -c random_page_cost=1.1
+      -c work_mem=8MB
+      -c io_method=io_uring
+    # -c synchronous_commit=off
+    security_opt:
+      - seccomp:unconfined
     healthcheck:
       test:
         ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d convex_self_hosted"]
       interval: 10s
       timeout: 5s
       retries: 5
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   convex-backend:
     container_name: ${CONVEX_BACKEND_CONTAINER_NAME}
@@ -39,10 +54,22 @@ services:
       - DISABLE_BEACON=${DISABLE_BEACON}
       - REDACT_LOGS_TO_CLIENT=${REDACT_LOGS_TO_CLIENT}
       - RUST_LOG=${RUST_LOG}
+      - TOKIO_WORKER_THREADS=${TOKIO_WORKER_THREADS}
+      - HIGHER_MEMORY_LIMITS=true
+      - COMMITTER_QUEUE_SIZE=${COMMITTER_QUEUE_SIZE}
+      - SUBSCRIPTION_INVALIDATION_DELAY_THRESHOLD=${SUBSCRIPTION_INVALIDATION_DELAY_THRESHOLD}
+      - SUBSCRIPTION_INVALIDATION_DELAY_MULTIPLIER=${SUBSCRIPTION_INVALIDATION_DELAY_MULTIPLIER}
+      - HTTP_SERVER_MAX_CONCURRENT_REQUESTS=${HTTP_SERVER_MAX_CONCURRENT_REQUESTS}
+      - SUBSCRIPTIONS_WORKER_QUEUE_SIZE=${SUBSCRIPTIONS_WORKER_QUEUE_SIZE}
+
     healthcheck:
       test: curl -f http://localhost:3210/version || exit 1
       interval: 5s
       start_period: 10s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-default"
